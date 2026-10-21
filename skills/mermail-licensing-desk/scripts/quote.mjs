@@ -47,11 +47,11 @@ function decimal(value, decimals, label, allowZero = false) {
   return units;
 }
 
-function rateNumber(value, decimals, label, allowZero = false) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new QuoteError("bad_rate_card", `${label}: finite numeric rate required`);
-  }
-  const units = decimal(String(value), decimals, label, allowZero);
+function rateUnits(value, decimals, label, allowZero = false) {
+  // JSON.parse may already have rounded a Number's source decimal. Requiring
+  // strings prevents us from presenting that altered amount as the owner's rate.
+  if (typeof value !== "string") throw new QuoteError("bad_rate_card", `${label}: exact decimal string required; migrate numeric rate-card values from the original owner record`);
+  const units = decimal(value, decimals, label, allowZero);
   if (units > BigInt(Number.MAX_SAFE_INTEGER)) {
     throw new QuoteError("bad_rate_card", `${label}: exceeds safe rate-card precision`);
   }
@@ -69,9 +69,6 @@ function lookup(table, key, label) {
   if (factor === null) {
     throw new QuoteError("needs_owner", `rate card marks ${label} "${key}" unavailable`);
   }
-  if (typeof factor !== "number" || !Number.isFinite(factor) || !(factor > 0)) {
-    throw new QuoteError("bad_rate_card", `${label} "${key}" factor must be a positive number`);
-  }
   return factor;
 }
 
@@ -79,7 +76,7 @@ function audienceFactor(tiers, audience) {
   if (!Number.isSafeInteger(audience) || audience < 0) {
     throw new QuoteError("needs_clarification", "audience must be a non-negative integer");
   }
-  if (!Array.isArray(tiers) || tiers.length === 0) return 1;
+  if (!Array.isArray(tiers) || tiers.length === 0) return "1";
   for (const tier of tiers) {
     if (tier.max === null || audience <= tier.max) return tier.factor;
   }
@@ -117,15 +114,15 @@ export function computeQuote(rateCard, request) {
     throw new QuoteError("needs_owner", `item "${request.item}" is not available exclusively`);
   }
   // A rate the owner has not set (e.g. "OWNER_SETS") is never priced by the agent.
-  if (typeof item.base !== "number" || !Number.isFinite(item.base) || !(item.base > 0)) {
+  if (item.base === undefined || item.base === null || item.base === "OWNER_SETS") {
     throw new QuoteError("needs_owner", `owner has not set a base rate for "${request.item}"`);
   }
-  if (item.floor !== undefined && (typeof item.floor !== "number" || !Number.isFinite(item.floor) || item.floor < 0)) {
+  if (item.floor === null || item.floor === "OWNER_SETS") {
     throw new QuoteError("needs_owner", `owner has not set a floor for "${request.item}"`);
   }
   if (!termText(item.title)) throw new QuoteError("bad_rate_card", "item title is required");
   const m = rateCard.multipliers ?? {};
-  const breakdown = [["base", 1]];
+  const breakdown = [["base", "1"]];
   breakdown.push([`media:${request.media}`, lookup(m.media, request.media, "media")]);
   breakdown.push([`territory:${request.territory}`, lookup(m.territory, request.territory, "territory")]);
   breakdown.push([`term:${request.term}`, lookup(m.term, request.term, "term")]);
@@ -135,16 +132,16 @@ export function computeQuote(rateCard, request) {
   if (rush && Number.isInteger(request.deadline_days) && request.deadline_days < rush.days_under) {
     breakdown.push([`rush:<${rush.days_under}d`, rush.factor]);
   }
-  const baseCents = rateNumber(item.base, 2, "base");
+  const baseCents = rateUnits(item.base, 2, "base");
   let cents = baseCents;
   for (const [label, factor] of breakdown) {
-    if (typeof factor !== "number" || !Number.isFinite(factor) || factor <= 0) throw new QuoteError("bad_rate_card", `${label}: positive finite factor required`);
-    const scaled = decimal(String(factor), 18, label);
+    if (typeof factor !== "string") throw new QuoteError("bad_rate_card", `${label}: exact decimal string multiplier required; numeric factors must be migrated from the original owner record`);
+    const scaled = decimal(factor, 18, label);
     const scale = 10n ** 18n;
     cents = (cents * scaled + scale / 2n) / scale;
     if (cents > BigInt(Number.MAX_SAFE_INTEGER)) throw new QuoteError("bad_rate_card", "quote exceeds safe cent range");
   }
-  const floorCents = rateNumber(item.floor ?? 0, 2, "floor", true);
+  const floorCents = rateUnits(item.floor ?? "0", 2, "floor", true);
   let floorApplied = false;
   if (cents < floorCents) {
     cents = floorCents;

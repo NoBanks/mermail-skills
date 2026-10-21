@@ -11,27 +11,29 @@ All files below are owner-supplied. Keep real addresses and payment references o
   "currency": "USDC",
   "items": {
     "wipers": { "title": "WIPERS (NoBanks Nearby)", "kind": "music", "base": "OWNER_SETS", "floor": "OWNER_SETS", "uses": ["sync"], "exclusive_available": false },
-    "lone-journey-869359": { "title": "Lone Journey #869359, framed print 19x13", "kind": "print", "base": 140, "edit_price": 125, "floor": 100, "uses": ["print_sale"], "exclusive_available": false },
-    "1440-0320pm-12x12": { "title": "1440 \"3:20 PM\", framed print 12x12", "kind": "print", "base": 70, "edit_price": 60, "floor": 50, "uses": ["print_sale"], "exclusive_available": false }
+    "lone-journey-869359": { "title": "Lone Journey #869359, framed print 19x13", "kind": "print", "base": "140", "edit_price": "125", "floor": "100", "uses": ["print_sale"], "exclusive_available": false },
+    "1440-0320pm-12x12": { "title": "1440 \"3:20 PM\", framed print 12x12", "kind": "print", "base": "70", "edit_price": "60", "floor": "50", "uses": ["print_sale"], "exclusive_available": false }
   },
   "multipliers": {
-    "media": { "web_social": 1, "podcast": 1.2, "film_festival": 1.5, "broadcast": 2.5, "advertising": 3, "theatrical": null, "print_wall": 1, "merch": 2 },
-    "territory": { "us": 1, "north_america": 1.25, "worldwide": 1.75 },
-    "term": { "1y": 1, "3y": 1.6, "perpetual": 2.5, "purchase": 1 },
-    "exclusivity": { "non_exclusive": 1, "exclusive": 3 },
+    "media": { "web_social": "1", "podcast": "1.2", "film_festival": "1.5", "broadcast": "2.5", "advertising": "3", "theatrical": null, "print_wall": "1", "merch": "2" },
+    "territory": { "us": "1", "north_america": "1.25", "worldwide": "1.75" },
+    "term": { "1y": "1", "3y": "1.6", "perpetual": "2.5", "purchase": "1" },
+    "exclusivity": { "non_exclusive": "1", "exclusive": "3" },
     "audience": [
-      { "max": 10000, "factor": 1 },
-      { "max": 1000000, "factor": 1.5 },
-      { "max": null, "factor": 2.5 }
+      { "max": 10000, "factor": "1" },
+      { "max": 1000000, "factor": "1.5" },
+      { "max": null, "factor": "2.5" }
     ]
   },
-  "rush": { "days_under": 7, "factor": 1.25 }
+  "rush": { "days_under": 7, "factor": "1.25" }
 }
 ```
 
-A `null` multiplier means the owner does not offer that option; the script returns `needs_owner`. A `base` or `floor` that is not a number (for example `"OWNER_SETS"`) means the owner has not priced that work yet; the script returns `needs_owner` and the agent drafts nothing priced. `edit_price` is informational for the owner and is never used by the script. A physical print sale uses `term: "purchase"` and `territory: "us"` so the quote equals the list price.
+A `null` multiplier means the owner does not offer that option; the script returns `needs_owner`. A missing base or `"OWNER_SETS"` base/floor means the owner has not priced that work yet; the script returns `needs_owner` and the agent drafts nothing priced. `edit_price` is informational for the owner and is never used by the script. A physical print sale uses `term: "purchase"` and `territory: "us"` so the quote equals the list price.
 
-Base/floor amounts have at most two decimal places. Pricing uses exact decimal multipliers and rounds half up to cents after each multiplier; unsafe rate-card numbers or cent overflow are rejected. Confirmation requires the owner to state the payment currency as well as its exact amount and reference. The quote hash checks consistency of the saved terms, not authenticity, ownership of rights, or actual settlement. Keep the owner-reviewed quote outside untrusted email content; a hash is not an approval or a custody record.
+Base/floor amounts must be plain decimal **strings** with at most two fractional digits; all selected multipliers, including audience and rush factors, must be positive plain decimal strings with at most 18 fractional digits. For example `"0.0000001"` is valid; `1e-7`, numeric `0.0000001`, and numeric prices are rejected. Counts such as audience maxima and rush days remain integers. Numeric legacy rate cards require an owner-reviewed migration from the original source record: never stringify an already parsed Number and claim that this recovers the original decimal. Even whole-number prices must be quoted in JSON. Prices and floors above `90071992547409.91`, or intermediate quote totals above that cent ceiling, are rejected.
+
+Pricing uses exact decimal multiplication and rounds half up to cents after each multiplier. Confirmation requires the owner to state the payment currency as well as its exact amount and reference. The quote hash checks consistency of the saved terms, not authenticity, ownership of rights, or actual settlement. Keep the owner-reviewed quote outside untrusted email content; a hash is not an approval or a custody record.
 
 ## Inquiry terms (`request.json`, built by the agent from the email)
 

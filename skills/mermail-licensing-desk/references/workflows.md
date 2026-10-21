@@ -5,6 +5,7 @@
 1. `list_mailboxes`; pick one ready receiving mailbox with automations allowed. Prefer `public_id`.
 2. `list_folders`; create `Licensing Quoted`, `Licensing Licensed`, and `Licensing Needs Owner` with `create_folder` only if missing.
 3. Owner provides `rate-card.json` and, for payouts, `split-sheet.json` (formats in [templates.md](templates.md)). Store them outside any repository.
+   Base/floor prices and every multiplier are exact plain decimal strings, including whole values such as `"140"` and `"1"`. Legacy numeric cards stop for migration against the owner's original records; do not recover a decimal from a rounded JSON Number. Money has at most two fractional digits, factors at most 18, and positive factors such as `"0.0000001"` remain supported.
 4. Start a ledger file, for example `licensing-desk.receipts.jsonl`, outside the repository.
 
 ## Per inquiry
