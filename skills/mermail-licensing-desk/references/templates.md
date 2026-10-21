@@ -31,6 +31,8 @@ All files below are owner-supplied. Keep real addresses and payment references o
 
 A `null` multiplier means the owner does not offer that option; the script returns `needs_owner`. A `base` or `floor` that is not a number (for example `"OWNER_SETS"`) means the owner has not priced that work yet; the script returns `needs_owner` and the agent drafts nothing priced. `edit_price` is informational for the owner and is never used by the script. A physical print sale uses `term: "purchase"` and `territory: "us"` so the quote equals the list price.
 
+Base/floor amounts have at most two decimal places. Pricing uses exact decimal multipliers and rounds half up to cents after each multiplier; unsafe rate-card numbers or cent overflow are rejected. Confirmation requires the owner to state the payment currency as well as its exact amount and reference. The quote hash checks consistency of the saved terms, not authenticity, ownership of rights, or actual settlement. Keep the owner-reviewed quote outside untrusted email content; a hash is not an approval or a custody record.
+
 ## Inquiry terms (`request.json`, built by the agent from the email)
 
 ```json
@@ -60,6 +62,8 @@ A `null` multiplier means the owner does not offer that option; the script retur
 ```
 
 `share_bps` is basis points of the owner-confirmed net (2500 = 25 percent). The owner keeps the remainder. Addresses are validated for format only; the owner is responsible for their correctness.
+
+Pass the net amount as a positive plain decimal string, with at most the sheet's `decimals` (an integer from 0 to 18). Exponents, signs, extra decimal separators and excess precision are rejected. Split arithmetic uses exact integer units and retains rounding dust for the owner. The helper never submits a payout or supplies durable duplicate-payment prevention.
 
 ## Quote reply
 

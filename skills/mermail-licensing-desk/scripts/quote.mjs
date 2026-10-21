@@ -3,7 +3,7 @@
 // No network, no dependencies, no wallet access. Prices come only from the owner's rate card.
 //
 //   node quote.mjs --rate-card rate-card.json --request request.json
-//   node quote.mjs --confirm --quote quote.json --paid 1800 --payment-ref "owner ref"
+//   node quote.mjs --confirm --quote quote.json --paid 1800 --currency USDC --payment-ref "owner ref"
 //   node quote.mjs --splits split-sheet.json --amount 1800
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -35,6 +35,32 @@ export function sha256(text) {
 
 const TERM_FIELDS = ["item", "use", "media", "territory", "term", "exclusivity", "audience"];
 
+function decimal(value, decimals, label, allowZero = false) {
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18 ||
+      typeof value !== "string" || !/^(0|[1-9]\d{0,63})(?:\.\d+)?$/.test(value)) {
+    throw new QuoteError("bad_amount", `${label}: use a bounded plain decimal string`);
+  }
+  const [whole, fraction = ""] = value.split(".");
+  if (fraction.length > decimals) throw new QuoteError("bad_amount", `${label}: excess precision`);
+  const units = BigInt(whole + fraction.padEnd(decimals, "0"));
+  if (!allowZero && units === 0n) throw new QuoteError("bad_amount", `${label}: must be positive`);
+  return units;
+}
+
+function rateNumber(value, decimals, label, allowZero = false) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new QuoteError("bad_rate_card", `${label}: finite numeric rate required`);
+  }
+  const units = decimal(String(value), decimals, label, allowZero);
+  if (units > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new QuoteError("bad_rate_card", `${label}: exceeds safe rate-card precision`);
+  }
+  return units;
+}
+
+const currencyCode = value => typeof value === "string" && /^[A-Z][A-Z0-9]{2,11}$/.test(value);
+const termText = value => typeof value === "string" && value.trim().length > 0 && value.length <= 256 && !/[\u0000-\u001f\u007f]/.test(value);
+
 function lookup(table, key, label) {
   if (!table || !(key in table)) {
     throw new QuoteError("needs_owner", `rate card has no ${label} rate for "${key}"`);
@@ -43,17 +69,17 @@ function lookup(table, key, label) {
   if (factor === null) {
     throw new QuoteError("needs_owner", `rate card marks ${label} "${key}" unavailable`);
   }
-  if (typeof factor !== "number" || !(factor > 0)) {
+  if (typeof factor !== "number" || !Number.isFinite(factor) || !(factor > 0)) {
     throw new QuoteError("bad_rate_card", `${label} "${key}" factor must be a positive number`);
   }
   return factor;
 }
 
 function audienceFactor(tiers, audience) {
-  if (!Array.isArray(tiers) || tiers.length === 0) return 1;
-  if (!Number.isInteger(audience) || audience < 0) {
+  if (!Number.isSafeInteger(audience) || audience < 0) {
     throw new QuoteError("needs_clarification", "audience must be a non-negative integer");
   }
+  if (!Array.isArray(tiers) || tiers.length === 0) return 1;
   for (const tier of tiers) {
     if (tier.max === null || audience <= tier.max) return tier.factor;
   }
@@ -61,15 +87,26 @@ function audienceFactor(tiers, audience) {
 }
 
 export function formatCents(cents) {
-  const sign = cents < 0 ? "-" : "";
-  const abs = Math.abs(cents);
-  return `${sign}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
+  if (typeof cents === "number" && !Number.isSafeInteger(cents)) throw new QuoteError("bad_amount", "unsafe cents");
+  const units = BigInt(cents);
+  const sign = units < 0n ? "-" : "";
+  const abs = units < 0n ? -units : units;
+  return `${sign}${abs / 100n}.${String(abs % 100n).padStart(2, "0")}`;
 }
 
 export function computeQuote(rateCard, request) {
+  if (!rateCard || !request || !currencyCode(rateCard.currency) ||
+      !termText(rateCard.owner) || !termText(rateCard.version)) {
+    throw new QuoteError("bad_rate_card", "owner, currency and version are required");
+  }
   const missing = TERM_FIELDS.filter((field) => request[field] === undefined || request[field] === "");
   if (missing.length) {
     throw new QuoteError("needs_clarification", `inquiry is missing: ${missing.join(", ")}`);
+  }
+  if (TERM_FIELDS.filter(field => field !== "audience").some(field => !termText(request[field])) ||
+      !Number.isSafeInteger(request.audience) || request.audience < 0 ||
+      (request.deadline_days !== undefined && (!Number.isSafeInteger(request.deadline_days) || request.deadline_days < 0))) {
+    throw new QuoteError("needs_clarification", "invalid or conflicting inquiry terms");
   }
   const item = rateCard.items?.[request.item];
   if (!item) throw new QuoteError("needs_owner", `item "${request.item}" is not on the rate card`);
@@ -80,12 +117,13 @@ export function computeQuote(rateCard, request) {
     throw new QuoteError("needs_owner", `item "${request.item}" is not available exclusively`);
   }
   // A rate the owner has not set (e.g. "OWNER_SETS") is never priced by the agent.
-  if (typeof item.base !== "number" || !(item.base > 0)) {
+  if (typeof item.base !== "number" || !Number.isFinite(item.base) || !(item.base > 0)) {
     throw new QuoteError("needs_owner", `owner has not set a base rate for "${request.item}"`);
   }
-  if (item.floor !== undefined && (typeof item.floor !== "number" || item.floor < 0)) {
+  if (item.floor !== undefined && (typeof item.floor !== "number" || !Number.isFinite(item.floor) || item.floor < 0)) {
     throw new QuoteError("needs_owner", `owner has not set a floor for "${request.item}"`);
   }
+  if (!termText(item.title)) throw new QuoteError("bad_rate_card", "item title is required");
   const m = rateCard.multipliers ?? {};
   const breakdown = [["base", 1]];
   breakdown.push([`media:${request.media}`, lookup(m.media, request.media, "media")]);
@@ -97,10 +135,16 @@ export function computeQuote(rateCard, request) {
   if (rush && Number.isInteger(request.deadline_days) && request.deadline_days < rush.days_under) {
     breakdown.push([`rush:<${rush.days_under}d`, rush.factor]);
   }
-  const baseCents = Math.round(item.base * 100);
+  const baseCents = rateNumber(item.base, 2, "base");
   let cents = baseCents;
-  for (const [, factor] of breakdown) cents = Math.round(cents * factor);
-  const floorCents = Math.round((item.floor ?? 0) * 100);
+  for (const [label, factor] of breakdown) {
+    if (typeof factor !== "number" || !Number.isFinite(factor) || factor <= 0) throw new QuoteError("bad_rate_card", `${label}: positive finite factor required`);
+    const scaled = decimal(String(factor), 18, label);
+    const scale = 10n ** 18n;
+    cents = (cents * scaled + scale / 2n) / scale;
+    if (cents > BigInt(Number.MAX_SAFE_INTEGER)) throw new QuoteError("bad_rate_card", "quote exceeds safe cent range");
+  }
+  const floorCents = rateNumber(item.floor ?? 0, 2, "floor", true);
   let floorApplied = false;
   if (cents < floorCents) {
     cents = floorCents;
@@ -128,20 +172,28 @@ export function computeQuote(rateCard, request) {
   };
 }
 
-export function confirmLicense(quote, { paid, paymentRef }) {
-  if (!quote?.terms || quote.terms_hash !== sha256(canonical(quote.terms))) {
+export function confirmLicense(quote, { paid, paymentRef, currency }) {
+  if (!quote?.terms || quote.status !== "quoted" ||
+      quote.terms_hash !== sha256(canonical(quote.terms)) ||
+      quote.quote_id !== `Q-${quote.terms_hash.slice(0, 12)}` ||
+      quote.price !== quote.terms.price || quote.currency !== quote.terms.currency ||
+      !currencyCode(quote.terms.currency) ||
+      !["owner", "title", "rate_card_version", ...TERM_FIELDS.filter(field => field !== "audience")].every(field => termText(quote.terms[field])) ||
+      !Number.isSafeInteger(quote.terms.audience) || quote.terms.audience < 0) {
     throw new QuoteError("tampered_quote", "quote terms no longer match terms_hash; re-quote");
   }
-  if (!paymentRef) throw new QuoteError("needs_owner", "owner payment reference is required");
-  const paidCents = Math.round(Number(paid) * 100);
-  const priceCents = Math.round(Number(quote.price) * 100);
-  if (!Number.isFinite(paidCents) || paidCents < priceCents) {
+  if (!termText(paymentRef)) throw new QuoteError("needs_owner", "owner payment reference is required");
+  if (!currencyCode(currency) || currency !== quote.terms.currency) throw new QuoteError("currency_mismatch", "owner-confirmed payment currency must match quote terms");
+  const paidCents = decimal(paid, 2, "paid");
+  const priceCents = decimal(quote.terms.price, 2, "quote price");
+  if (paidCents < priceCents) {
     throw new QuoteError("underpaid", `owner-confirmed payment ${paid} is below quoted ${quote.price}`);
   }
   const record = {
     quote_id: quote.quote_id,
     terms_hash: quote.terms_hash,
     paid: formatCents(paidCents),
+    currency,
     payment_ref_hash: sha256(String(paymentRef)),
   };
   const licenseHash = sha256(canonical(record));
@@ -159,12 +211,8 @@ const SOLANA = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export function computeSplits(sheet, amount) {
   const decimals = sheet.decimals ?? 6;
+  const total = decimal(amount, decimals, "split amount");
   const unit = 10n ** BigInt(decimals);
-  const [whole, frac = ""] = String(amount).split(".");
-  if (!/^\d+$/.test(whole) || !/^\d*$/.test(frac) || frac.length > decimals) {
-    throw new QuoteError("bad_amount", `amount must be a decimal with at most ${decimals} places`);
-  }
-  const total = BigInt(whole) * unit + BigInt((frac || "0").padEnd(decimals, "0"));
   const people = sheet.collaborators ?? [];
   let bps = 0;
   const addressCheck = sheet.chain === "solana" ? SOLANA : EVM;
@@ -222,7 +270,7 @@ export function main(argv) {
   const a = args(argv);
   try {
     let result;
-    if (a.confirm) result = confirmLicense(readJson(a.quote), { paid: a.paid, paymentRef: a["payment-ref"] });
+    if (a.confirm) result = confirmLicense(readJson(a.quote), { paid: a.paid, currency: a.currency, paymentRef: a["payment-ref"] });
     else if (a.splits) result = computeSplits(readJson(a.splits), a.amount);
     else result = computeQuote(readJson(a["rate-card"]), readJson(a.request));
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

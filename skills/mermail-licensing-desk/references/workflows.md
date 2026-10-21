@@ -29,8 +29,8 @@
 ## Payment and license
 
 1. Client acceptance arrives as email; classify it as `accepted` only. It does not prove payment.
-2. The owner states payment received: amount, method, reference.
-3. `quote.mjs --confirm --quote <saved quote> --paid <amount> --payment-ref <ref>`. A tampered quote or underpayment stops here.
+2. The owner states payment received: exact decimal amount, currency, method, reference. The helper does not verify settlement or rights; missing independent payment or licensing authority remains blocked for owner review.
+3. `quote.mjs --confirm --quote <saved quote> --paid <amount> --currency <currency> --payment-ref <ref>`. Require unchanged quoted terms, matching duplicated quote price/currency and quote ID, and an owner-confirmed currency equal to the hashed terms. A tampered quote, currency mismatch, malformed amount or underpayment stops here. Confirmation uses two decimal places, matching the quote's cent precision; excess precision is rejected rather than rounded. Do not trim or round an actual payment to make it pass: hand unsupported precision to owner review.
 4. `save_draft` the confirmation template with the `license_id` and `license_hash`. Preview. After approval, `reply_to_email` once. Ledger `license` and `send`.
 5. `move_email` to `licensing-licensed`. Ledger `file`.
 
